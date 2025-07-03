@@ -25,20 +25,20 @@ sphere = Hypersphere(dim=d)
 mfd= sphere.metric
 
 
-tau_lst = [0,0.25,0.5,1.0]
+tau_lst = [0.25,0.5,0.75,1.0,0.125,0.375]
 
 T_lst=[50,100,500]
 tau =tau_lst[s1]
 nsamples = T_lst[s2]
-print(nsamples)
-
+print(str(tau))
+print(str(nsamples))
 
 bp0 = np.array([0,0,0,0,0,0,1])
 
 def generate_sample_tangent_space(base=bp0,n_samples=1,sigma=1):
     # generate i.i.d gaussian noise on tangent space
     size = (n_samples, d) if n_samples != 1 else (1,d)
-
+    
     tangent_vec_aux = sigma*(gs.random.uniform(size=size)-0.5)
     tangent_vec = np.zeros(shape=(n_samples, d+1))
     tangent_vec[:,:d]=tangent_vec_aux
@@ -55,7 +55,7 @@ def generate_ar_ts(base=bp0,n_samples=1,sigma=1,rho=0.5,tau=1,bt=np.array([1,0,0
     # generate AR(1)  process X_t -mu = rho(t/n)(X_{t-1}-mu)+epsilon
     ## rho(u) = 0.3+0.2*u^2
     mut0 =mfd.geodesic(initial_point=base,end_point=bt)
-
+    
     if n_samples ==1:
         return generate_random_sample(base,n_samples=1)
     else:
@@ -68,9 +68,11 @@ def generate_ar_ts(base=bp0,n_samples=1,sigma=1,rho=0.5,tau=1,bt=np.array([1,0,0
             #rhotmp =  0.2*np.cos(2*u*np.pi)+rho+u*(1-u)
             rhotmp = rho+0.5*u*(1-u)
             delta = data_tv[i-1,:]
-            inten = sigma*(1+u)
-
-            noise = generate_sample_tangent_space(base=base,n_samples=1,sigma=inten)
+            
+            inten = 1.1*(1+u)*sigma/(1+tau)
+            
+            noise = generate_sample_tangent_space(base=base,n_samples=1,sigma=sigma/(1+tau))
+            noise[0:3] =  inten*noise[0:3]
            # data_tv[i,:]  = rhotmp*delta + noise
             if(tau>0):
                 data_tv[i, :] = mfd.parallel_transport(tangent_vec=rhotmp * (delta) + noise, base_point=base,
@@ -78,9 +80,9 @@ def generate_ar_ts(base=bp0,n_samples=1,sigma=1,rho=0.5,tau=1,bt=np.array([1,0,0
                 data[i] = mfd.exp(tangent_vec= data_tv[i, :], base_point=mut0(tau*u))
             else:
                 data_tv[i, :] = rhotmp * (delta) + noise
-
+                                                    
                 data[i] = mfd.exp(tangent_vec= data_tv[i, :], base_point=base)
-
+                
         #tvnorm =mfd.inner_coproduct(data_tv,data_tv,base)
        # data =mfd.exp(tangent_vec=data_tv,base_point=base)
         return(data)
@@ -93,7 +95,7 @@ def resvec_to_sum(res_vec,w=3):
     res =np.zeros((N-w+1,dim))
     for i in range(dim):
         res[:,i] = np.convolve(res_vec[:,i], np.ones(w), 'valid')
-
+    
     return res
 
 def gamma_m(res_vec,w=3):
@@ -112,15 +114,15 @@ def volatity(res_vec,wlst):
     localvar_res=np.zeros(shape=(n-wm+1 ,dim,L))
     for i in range(L):
          localvar_res[:,:,i] = gamma_m(res_vec,wlst[i])[:(n-wm+1),]
-
+    
     vol = np.zeros((n-wm+1, dim,L-2))
     for j in range(n-wm+1):
         for k in range(dim):
             for i in range(L-4):
                 vol[j,k,i] = np.std(localvar_res[j,k,i:(i+3)])
-
+    
     vol_sum = np.sum(vol,axis=1)
-
+    
     return np.max(vol_sum,axis=0)
 
 def select_window(res_vec,wlst):
@@ -136,7 +138,7 @@ def local_sum(res,w=3):
     locsum =np.zeros((N-w+1,dim))
     for i in range(dim):
         locsum[:,i] = np.convolve(res[:,i], np.ones(w), 'valid')
-
+    
     return locsum
 
 def Hess(res,mu):
@@ -145,12 +147,12 @@ def Hess(res,mu):
     ftheta=theta/np.sin(theta)
     u = np.reshape(u,(d+1,1))
     x = np.reshape(mu,(d+1,1))
-
-
+    
+    
     H = np.dot(u,np.transpose(u)) + ftheta*np.cos(theta)* (
         np.eye(7)-np.dot(u,np.transpose(u))-np.dot(x,np.transpose(x)))
     return(H)
-
+    
 
 def Hprocess(residual,mean):
     N = residual.shape[0]
@@ -192,7 +194,7 @@ def bootstrap_test(residual, mean, w=24 ,B=400,seed=2023):
     res_cusum_norm = np.sqrt(mfd.inner_product(res_cusum,res_cusum,mean))
 
     Tn = res_cusum_norm.max()/np.sqrt(n)
-
+    
     B =B# bootstrap size
     Boot_Stat= np.zeros(B)
     Boot_Stat2= np.zeros(B)
@@ -202,52 +204,50 @@ def bootstrap_test(residual, mean, w=24 ,B=400,seed=2023):
         Phi = generate_Phi(locsum)/np.sqrt(w*(n-w+1))
         Phi2 = generate_Phi(locsum)/np.sqrt(w*(n-w+1))
         HinvPhi = Hinv(Phi[n-w],mean,Ht[n-w])
-
+        
         for k in range(n-w+1):
             Phi[k] = Phi[k]-np.dot(Ht[k],HinvPhi)
             Phi2[k] = Phi2[k]-(k+1)/(n-w+1)*Phi2[n-w]
-
+        
         Phinorm = np.sqrt(mfd.inner_product(Phi,Phi,mean))
         Phinorm2 = np.sqrt(mfd.inner_product(Phi2,Phi2,mean))
         Boot_Stat[i] = np.max(Phinorm[w:])
         Boot_Stat2[i] = np.max(Phinorm2[w:])
-
+        
     return np.mean(Boot_Stat>=Tn), np.mean(Boot_Stat2>=Tn)
 
 
 def bootstrap_test_mp(m):
-
+    
     np.random.seed(m)
-
+    
 #     pval1 = np.zeros(M)
 #     pval2 = np.zeros(M)
     B = 2000 #bootstrap size
     bp = gs.eye(d)
+    
+    data = generate_ar_ts(base=bp0 ,n_samples=nsamples,sigma=1,rho=0.05,tau=tau) #generate data , mean =id
 
-    data = generate_ar_ts(base=bp0 ,n_samples=nsamples,sigma=1.1,rho=0.05,tau=tau) #generate data , mean =id
-
-    L = max(0.02*nsamples,2)-1
+    L = max(0.02*nsamples,2)
     U = 0.1*nsamples+1
     windows =np.arange(L,U)
    # windows =np.linspace(0.02, 0.05, num=20) * nsample= 400
     windows = (np.rint(windows)).astype(int)
     #windows= (np.rint(windows)).astype(int)# window size candidate
-
-
+    
+    
     fmean =  FrechetMean(metric=mfd,epsilon=0.0000001,max_iter=100000)
     fmean.fit(data) # frechet mean function
     mean =fmean.estimate_ # empirical frechet mean
-
+    
     residual = mfd.log(point=data,base_point=mean) # residual
-
+ 
     w1 = select_window(residual,windows) # selec window size in bootstrap
-
-
+    
+    
     pval1,pval2 = bootstrap_test(residual, mean, w=w1 ,B=B,seed=m)
 
     return (pval1, pval2,w1)
-
-
 
 
 
@@ -258,7 +258,7 @@ pval1 = np.zeros(M)
 pval2 = np.zeros(M)
 #B = 3600 #bootstrap size
 start1=time.time()
-p=Pool(6)
+p=Pool(16)
 
 result = p.map_async(bootstrap_test_mp, range(M))
 
@@ -275,5 +275,7 @@ np.save('pval_debias' +'_tau_'+str(s1)+'_T_'+str(s2)+'.npy', pval1)
 np.save('pval_bias' + '_tau_'+str(s1)+'_T_'+str(s2)+'.npy', pval2)
 end1=time.time()
 print(end1-start1)
+print(np.mean(pval1<=0.05))
+print(np.mean(pval2<=0.05))
 p.terminate()
 
